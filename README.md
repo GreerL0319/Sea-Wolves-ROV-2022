@@ -10,3 +10,6 @@ changes made--
 
 -crabbing and moving vertically now gradually increases
 -camera controls added
+
+12/15/22
+PID works now i think, probably needs adjustment but i wont be able to tell until we can test it
