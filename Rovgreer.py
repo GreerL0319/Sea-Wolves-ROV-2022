@@ -43,7 +43,8 @@ back_right_display = widgets.display("BR Thruster", sidebarwidth)
 # open serial com to Arduino
 ser = serial.Serial(port='COM5', baudrate=9600, timeout=.1,dsrdtr=True)  # dsrdtr=True stops Arduino Mega from autoresetting
 
-#pid
+#pid setup; the tunings will probably need to change for our robot
+#PID(GAIN,RESET,PREACT)
 p=PID.PID(.01,.004,.01)
 p.setPoint(0)
 
@@ -62,7 +63,7 @@ def ServoConfinements(servo):#servos need to stay between value of 1 and -1 (110
         servo=-1
     return servo
 
-def ArduinoToPython():#retrieves data from the arduino
+def ArduinoToPython(mvgavg):#retrieves data from the arduino
     data = ser.readline().decode("utf-8")  # decode into byte from Arduino
     print(data)
     dict_json = json.loads(data)  # data from arduino in dictionary form
@@ -90,9 +91,13 @@ def ArduinoToPython():#retrieves data from the arduino
     cam2_display.value=dict_json['sig_cam2']
 
     pid = p.update(dict_json['pressure']);
-
-    pid+=11.888
     ser.flush()
+    return pid
+
+def RollingAverage(pid,pidlist):
+    #here we create an array that keeps track of the last 3 instances of the pid and averages them
+    pidlist.append(pid)
+    pid=(mvgavg(-1)+mvgavg(-2)+mvgavg(-3))/3 #creating an infinite array like this might use too much memory
     return pid
 
 def PythontoArduino(commands):
@@ -193,12 +198,13 @@ pidtoggle=False
 crab=0
 z=0
 pid=0
+pidlist()
 while True:
     try:
         pid = ArduinoToPython()
     except Exception as e:
         print(e)
-    pass
+    pid=RollingAverage(pid,pidlist)
     camstate = 0
     pygame.event.pump()  # internally process pygame event handlers
     for event in pygame.event.get():  # get events from the queue
@@ -264,5 +270,4 @@ while True:
     CamControl(commands, camstate)
     PythontoArduino(commands)
     GuiBlit()  # blits all of our data onto the screen
-
 
