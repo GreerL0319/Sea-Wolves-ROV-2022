@@ -3,6 +3,7 @@ import json
 import time
 import pygame
 import math  # needed for joystick
+import PID
 #from pygame.rect import Rect
 import widgets
 import serial  # needed to talk with Arduino
@@ -22,8 +23,11 @@ zslider = widgets.sliderdisplay("Z", 75, 160)
 mleftslider = widgets.sliderdisplay("Leftslider", 75, 160)
 mrightslider = widgets.sliderdisplay("Rightslider", 75, 160)
 temp_display = widgets.display("Temp_TMP36 (F)", sidebarwidth)  # tmp36 sensor
+pressure_display = widgets.display("Pressure (Pa)", sidebarwidth)  # tmp36 sensor
 temp_dht22_display = widgets.display("Temp_DHT22 (F)", sidebarwidth)  # DHT22 sensor
-humid_dht22_display = widgets.display("Humidity", sidebarwidth)  # DHT22 sensor
+humid_dht22_display = widgets.display("Humidity (g/kg)", sidebarwidth)  # DHT22 sensor
+altitude_display=widgets.display("Altitude (m)",sidebarwidth)
+depth_display=widgets.display("Depth (m)",sidebarwidth)
 
 #Servos
 th_up_display = widgets.display("Servo Up", sidebarwidth)
@@ -38,6 +42,10 @@ back_right_display = widgets.display("BR Thruster", sidebarwidth)
 
 # open serial com to Arduino
 ser = serial.Serial(port='COM5', baudrate=9600, timeout=.1,dsrdtr=True)  # dsrdtr=True stops Arduino Mega from autoresetting
+
+#pid
+p=PID.PID(.01,.004,.01)
+p.setPoint(0)
 
 # init joystick
 joystick = None
@@ -58,10 +66,20 @@ def ArduinoToPython():#retrieves data from the arduino
     data = ser.readline().decode("utf-8")  # decode into byte from Arduino
     print(data)
     dict_json = json.loads(data)  # data from arduino in dictionary form
+
+    dict_json['pressure']=round(dict_json['pressure'])
+    dict_json["altitude"] = round(dict_json["altitude"],2)
+    dict_json["depth"] = round(dict_json["depth"],2)
+
+
     # print(dict_json)
     temp_dht22_display.value = dict_json['temp_dht']  # temp from DHT22 sensor
     humid_dht22_display.value = dict_json['humid_dht']  # humid from DHT sensor
     temp_display.value = dict_json['volt']  # assign temp in Fahrenheit to display
+    pressure_display.value = dict_json['pressure']
+    altitude_display.value = dict_json['altitude']
+    depth_display.value = dict_json['depth']
+
 
     th_up_display.value = dict_json['sig_up_1']  # vertical thruster value from Arduino
     front_left_display.value = dict_json['sig_lff']  # left front thruster value from Arduino
@@ -71,7 +89,11 @@ def ArduinoToPython():#retrieves data from the arduino
     cam1_display.value=dict_json['sig_cam1'] #camera position values
     cam2_display.value=dict_json['sig_cam2']
 
+    pid = p.update(dict_json['pressure']);
+
+    pid+=11.888
     ser.flush()
+    return pid
 
 def PythontoArduino(commands):
     MESSAGE = json.dumps(commands)  # puts python dictionary in Json format
@@ -137,6 +159,9 @@ def GuiBlit():
                 (0, dheight))  # blitting temperature values pick a font you have and set its size
     screen.blit(temp_dht22_display.render(), (220, dheight))
     screen.blit(humid_dht22_display.render(), (220, 2 * dheight))
+    screen.blit(pressure_display.render(), (0, 6 * dheight))
+    screen.blit(altitude_display.render(), (220, 6 * dheight))
+    screen.blit(depth_display.render(), (0, 7 * dheight))
 
     screen.blit(cam1_display.render(), (0, 5 * dheight))
     screen.blit(cam2_display.render(), (220, 5 * dheight))
@@ -159,76 +184,85 @@ def GuiBlit():
     pygame.display.flip()  # update screen
     time.sleep(0.01)
 
-def Main(crab_left,crab_right,camtoggle,vert_up,vert_down,crab,Z):
-    while True:
-        global z
-        camstate=0
-        pygame.event.pump()  # internally process pygame event handlers
-        for event in pygame.event.get():  # get events from the queue
-            if event.type == pygame.QUIT:  # clean exit on quitting (x window)
-                pygame.exit()
-                pygame.running = False
-            elif event.type == pygame.JOYBUTTONDOWN:
-                # check if a button is pushed
-                if event.button == 0:  # The button with 1 is pushed
-                    onstatus.toggle()
-                if event.button == 3:
-                    if camtoggle:
-                        camtoggle = False
-                    else:
-                        camtoggle = True
-                if event.button == 4:
-                    crab_left = True
-                if event.button == 5:
-                    crab_right = True
-                if event.button==6:
-                    vert_up=True
-                if event.button==7:
-                    vert_down=True
-            elif event.type == pygame.JOYBUTTONUP:  # this format with the TrueFalse values and joybutton up seems to be the only way pygame can check if a button is held
-                if event.button == 4:
-                    crab_left = False
-                    crab=0
-                if event.button == 5:
-                    crab_right = False
-                    crab=0
-                if event.button==6:
-                    vert_up=False
-                    z=0
-                if event.button==7:
-                    vert_down=False
-                    z=0
-        if crab_left:
-            crab -=.1
-        if crab_right:
-            crab +=.1
-        if camtoggle:
-            camstate=1
-        if vert_up:
-            z+=.1
-        if vert_down:
-            z-=.1
-        z=ServoConfinements(z)
-        crab=ServoConfinements(crab)
-        commands = {}  # define python dictionary
-        commands['tup'] = -z ** 3
-        JoystickCommands(crab,commands)  # function returns controller inputs
-        CamControl(commands,camstate)
-        PythontoArduino(commands)
-        try:
-            ArduinoToPython()
-        except Exception as e:
-            print(e)
-        pass
-        GuiBlit()  # blits all of our data onto the screen
-
 crab_left = False
 crab_right = False
 camtoggle=False
 vert_up=False
 vert_down=False
+pidtoggle=False
 crab=0
 z=0
-Main(crab_left, crab_right,camtoggle,vert_up,vert_down,crab,z)
+pid=0
+while True:
+    try:
+        pid = ArduinoToPython()
+    except Exception as e:
+        print(e)
+    pass
+    camstate = 0
+    pygame.event.pump()  # internally process pygame event handlers
+    for event in pygame.event.get():  # get events from the queue
+        if event.type == pygame.QUIT:  # clean exit on quitting (x window)
+            pygame.exit()
+            pygame.running = False
+        elif event.type == pygame.JOYBUTTONDOWN:
+            # check if a button is pushed
+            if event.button == 9:  # The button with 1 is pushed
+                onstatus.toggle()
+            if event.button == 2:
+                if pidtoggle:
+                    pidtoggle=False
+                else:
+                    pidtoggle = True
+            if event.button == 3:
+                if camtoggle:
+                    camtoggle = False
+                else:
+                    camtoggle = True
+            if event.button == 4:
+                crab_left = True
+            if event.button == 5:
+                crab_right = True
+            if event.button == 6:
+                vert_up = True
+            if event.button == 7:
+                vert_down = True
+
+        elif event.type == pygame.JOYBUTTONUP:  # this format with the TrueFalse values and joybutton up seems to be the only way pygame can check if a button is held
+            if event.button == 4:
+                crab_left = False
+                crab = 0
+            if event.button == 5:
+                crab_right = False
+                crab = 0
+            if event.button == 6:
+                vert_up = False
+                z = 0
+            if event.button == 7:
+                vert_down = False
+                z = 0
+    if crab_left:
+        crab -= .1
+    if crab_right:
+        crab += .1
+    if camtoggle:
+        camstate = 1
+    if vert_up:
+        z += .1
+    if vert_down:
+        z -= .1
+    print(pid)
+    print(pidtoggle)
+    if pidtoggle:
+        z = pid;
+    print(z)
+    z = ServoConfinements(z)
+    crab = ServoConfinements(crab)
+    commands = {}  # define python dictionary
+    commands['tup'] = -z ** 3
+    JoystickCommands(crab, commands)  # function returns controller inputs
+    CamControl(commands, camstate)
+    PythontoArduino(commands)
+    GuiBlit()  # blits all of our data onto the screen
 
 
