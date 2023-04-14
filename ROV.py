@@ -6,7 +6,7 @@ import math  # needed for joystick
 import PID
 #from pygame.rect import Rect
 import widgets
-import serial  # needed to talk with Arduino
+import serial  # needed to talk with Arduino #the library needed to install is called pyserial not just serial
 
 # GUI window setup
 sidebarwidth = 220
@@ -63,7 +63,7 @@ def ServoConfinements(servo):#servos need to stay between value of 1 and -1 (110
         servo=-1
     return servo
 
-def ArduinoToPython(mvgavg):#retrieves data from the arduino
+def ArduinoToPython():#retrieves data from the arduino
     data = ser.readline().decode("utf-8")  # decode into byte from Arduino
     print(data)
     dict_json = json.loads(data)  # data from arduino in dictionary form
@@ -87,6 +87,7 @@ def ArduinoToPython(mvgavg):#retrieves data from the arduino
     front_right_display.value = dict_json['sig_rtf']  # right front thruster value from Arduino
     back_left_display.value = dict_json['sig_lfb']  # left back thruster value from Arduino
     back_right_display.value = dict_json['sig_rtb']  # right back thruster value from Arduino
+
     cam1_display.value=dict_json['sig_cam1'] #camera position values
     cam2_display.value=dict_json['sig_cam2']
 
@@ -97,7 +98,7 @@ def ArduinoToPython(mvgavg):#retrieves data from the arduino
 def RollingAverage(pid,pidlist):
     #here we create an array that keeps track of the last 3 instances of the pid and averages them
     pidlist.append(pid)
-    pid=(mvgavg(-1)+mvgavg(-2)+mvgavg(-3))/3 #creating an infinite array like this might use too much memory
+    pid=(pidlist[-1]+pidlist[-2]+pidlist[-3])/3 #creating an infinite array like this might use too much memory
     return pid
 
 def PythontoArduino(commands):
@@ -198,7 +199,7 @@ pidtoggle=False
 crab=0
 z=0
 pid=0
-pidlist()
+pidlist=[0,0,0]
 while True:
     try:
         pid = ArduinoToPython()
@@ -257,8 +258,6 @@ while True:
         z += .1
     if vert_down:
         z -= .1
-    print(pid)
-    print(pidtoggle)
     if pidtoggle:
         z = pid;
     print(z)
@@ -270,4 +269,3 @@ while True:
     CamControl(commands, camstate)
     PythontoArduino(commands)
     GuiBlit()  # blits all of our data onto the screen
-
