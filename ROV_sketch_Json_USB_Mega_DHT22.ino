@@ -14,14 +14,17 @@ int tempPin = A1;//define analog pin to read TMP36 sensor
 byte DHTPIN =8; //DHT22 PWM pin assign
 DHT dht = DHT(DHTPIN,DHT22);
 
-byte servoPin_rtf= 3; // Rightf thruster PWM
-byte servoPin_lff= 2; //Leftf thruster PWM
-byte servoPin_rtb= 6; // Rightb thruster PWM
-byte servoPin_lfb= 7; //Leftb thruster PWM
-byte servoPin_up1 = 5; //Up1 thruster PWM
-byte servoPin_up2 = 4; //Up2 thruster PWM
+byte servoPin_lff= 24; //Leftf thruster PWM
+byte servoPin_rtf= 26; // Rightf thruster PWM
+byte servoPin_lfb= 28; //Leftb thruster PWM
+byte servoPin_rtb= 30; // Rightb thruster PWM
+byte servoPin_up1 = 32; //Up1 thruster PWM
+byte servoPin_up2 = 34; //Up2 thruster PWM
 byte servoPin_cam1=8; //Camera 1 thruster PWM
 byte servoPin_cam2=9; //Camera 1 thruster PWM
+byte servoPin_pswitch=22; //power switch
+byte servoPin_clawmanip=1; //claw servo
+
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);// initialize digital pin LED_BUILTIN as an output.
@@ -35,6 +38,8 @@ void setup() {
   servo_rtb.attach(servoPin_rtb);
   servo_cam1.attach(servoPin_cam1);
   servo_cam2.attach(servoPin_cam2);
+  servo_pswitch.attach(servoPin_pswitch);
+  servo_clawmanip.attach(servoPin_clawmanip);
   
   Wire.begin();
   sensor.setModel(MS5837::MS5837_02BA);
@@ -59,7 +64,11 @@ void loop() {
     thruster=Serial.readStringUntil( '\x7D' );//Read data from Arduino until};
     StaticJsonDocument<1000> json_doc; //the StaticJsonDocument we write to
     deserializeJson(json_doc,thruster);
- 
+
+    //Power Switch
+    float pswitch_sig=json_doc["spswitch"];
+    servo_pswitch=writeMicroseconds(pswitch_sig);
+    
     //Leftf Thruster
     float front_left=json_doc["tleftf"];
     int front_left_sig=(front_left+1)*400+1100; //map controller to servo
@@ -94,11 +103,15 @@ void loop() {
     float cam1=json_doc["scam1"];
     int cam_sig_1=(cam1+1)*400+1100;
     servo_cam1.writeMicroseconds(cam_sig_1);
-
+    
     //Camera 2 Servo
     float cam2=json_doc["scam2"];
     int cam_sig_2=(cam2+1)*400+1100;
     servo_cam2.writeMicroseconds(cam_sig_2);
+
+    //Claw Manip
+    int claw_sig=json_doc["sclaw"];
+    servo_clawmanip.writeMicroseconds(claw_sig);
 
     //Read Temperature, return to surface
     val=analogRead(tempPin);//read arduino pin
@@ -110,6 +123,7 @@ void loop() {
     float h = dht.readHumidity();
     float t = dht.readTemperature(true);//Read temperature in Fahrenheit
 
+    doc["sig_pswitch"]=pswitch_sig;//power
     doc["sig_up_1"]=th_up_sig_1;
     doc["sig_up_2"]=th_up_sig_2;
     doc["sig_rtf"]=front_right_sig;
@@ -118,6 +132,7 @@ void loop() {
     doc["sig_lfb"]=back_left_sig;
     doc["sig_cam1"]=cam_sig_1;
     doc["sig_cam2"]=cam_sig_2;
+    doc["sig_claw"]=claw_sig;
     doc["temp"]=cel;//add temp in Celsius to StaticJsonDocument
     doc["volt"]=mv;// add temp in Fahrenheit 
     doc["temp_dht"]=t;//temperature from dht22
@@ -136,4 +151,3 @@ void loop() {
     delay(10);
   }
 }
-    
