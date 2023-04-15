@@ -1,10 +1,8 @@
-#import sys
 import json
 import time
 import pygame
 import math  # needed for joystick
 import PID
-#from pygame.rect import Rect
 import widgets
 import serial  # needed to talk with Arduino #the library needed to install is called pyserial not just serial
 
@@ -116,12 +114,15 @@ def CamControl(commands,camstate):
         if onstatus.state:
             camaxis *= 1.414  # gives value of 1 for full thrust left and right
             camaxis=ServoConfinements(camaxis)
+    print(camaxis)
+    camaxis=ServoConfinements(camaxis)
     if camstate==0:
         commands["scam1"]=camaxis
         commands["scam2"]=0
     elif camstate==1:
         commands["scam1"]=0
         commands["scam2"]=camaxis
+    print(commands["scam2"])
 
 def JoystickCommands(crab,commands):
     x=0
@@ -196,10 +197,15 @@ camtoggle=False
 vert_up=False
 vert_down=False
 pidtoggle=False
+clawopen=False
+pswitch=False
 crab=0
 z=0
 pid=0
+claw=1100
 pidlist=[0,0,0]
+
+
 while True:
     try:
         pid = ArduinoToPython()
@@ -210,29 +216,34 @@ while True:
     pygame.event.pump()  # internally process pygame event handlers
     for event in pygame.event.get():  # get events from the queue
         if event.type == pygame.QUIT:  # clean exit on quitting (x window)
-            pygame.exit()
             pygame.running = False
+            pygame.quit()
         elif event.type == pygame.JOYBUTTONDOWN:
             # check if a button is pushed
-            if event.button == 9:  # The button with 1 is pushed
+            if event.button == 11:  #should be start
                 onstatus.toggle()
-            if event.button == 2:
+            if event.button == 2:#A
+                if clawopen:
+                    clawopen = False
+                else:
+                    clawopen = True
+            if event.button == 2: #X
                 if pidtoggle:
                     pidtoggle=False
                 else:
                     pidtoggle = True
-            if event.button == 3:
+            if event.button == 3:#Y
                 if camtoggle:
                     camtoggle = False
                 else:
                     camtoggle = True
-            if event.button == 4:
+            if event.button == 4:#LB
                 crab_left = True
-            if event.button == 5:
+            if event.button == 5:#RB
                 crab_right = True
-            if event.button == 6:
+            if event.button == 6:#RT, the current controller does not seem to register the triggers as buttons so i might have to change this or get new controller
                 vert_up = True
-            if event.button == 7:
+            if event.button == 7:#LT
                 vert_down = True
 
         elif event.type == pygame.JOYBUTTONUP:  # this format with the TrueFalse values and joybutton up seems to be the only way pygame can check if a button is held
@@ -252,19 +263,31 @@ while True:
         crab -= .1
     if crab_right:
         crab += .1
+
     if camtoggle:
         camstate = 1
+
     if vert_up:
         z += .1
     if vert_down:
         z -= .1
+
     if pidtoggle:
-        z = pid;
+        z = pid
+    else:
+        z=0
+
+    if clawopen:
+        claw=1900
+    else:
+        claw=1100
+
     print(z)
     z = ServoConfinements(z)
     crab = ServoConfinements(crab)
     commands = {}  # define python dictionary
     commands['tup'] = -z ** 3
+    commands['sclaw']=claw
     JoystickCommands(crab, commands)  # function returns controller inputs
     CamControl(commands, camstate)
     PythontoArduino(commands)
