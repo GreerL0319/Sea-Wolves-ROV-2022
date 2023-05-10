@@ -1,10 +1,8 @@
-#import sys
 import json
 import time
 import pygame
 import math  # needed for joystick
 import PID
-#from pygame.rect import Rect
 import widgets
 import serial  # needed to talk with Arduino #the library needed to install is called pyserial not just serial
 
@@ -31,9 +29,8 @@ depth_display=widgets.display("Depth (m)",sidebarwidth)
 
 #Servos
 th_up_display = widgets.display("Servo Up", sidebarwidth)
-cam1_display=widgets.display("Cam 1 Servo", sidebarwidth)
-cam2_display=widgets.display("Cam 2 Servo", sidebarwidth)
-
+cam_display=widgets.display("Cam Servo", sidebarwidth)
+manip_display=widgets.display("Manipulator",sidebarwidth)
 #Thrusters
 front_left_display = widgets.display("FL Thruster", sidebarwidth)
 front_right_display = widgets.display("FR Thruster", sidebarwidth)
@@ -82,16 +79,23 @@ def ArduinoToPython():#retrieves data from the arduino
     depth_display.value = dict_json['depth']
 
 
-    th_up_display.value = dict_json['sig_up_1']  # vertical thruster value from Arduino
-    front_left_display.value = dict_json['sig_lff']  # left front thruster value from Arduino
-    front_right_display.value = dict_json['sig_rtf']  # right front thruster value from Arduino
-    back_left_display.value = dict_json['sig_lfb']  # left back thruster value from Arduino
-    back_right_display.value = dict_json['sig_rtb']  # right back thruster value from Arduino
+    th_up_display.value = dict_json['sig_up']  # vertical thruster value from Arduino
+    front_left_display.value = dict_json['left_front']  # left front thruster value from Arduino
+    front_right_display.value = dict_json['right_front']  # right front thruster value from Arduino
+    back_left_display.value = dict_json['left_back']  # left back thruster value from Arduino
+    back_right_display.value = dict_json['right_back']  # right back thruster value from Arduino
 
-    cam1_display.value=dict_json['sig_cam1'] #camera position values
-    cam2_display.value=dict_json['sig_cam2']
+    print(dict_json['right_front'])
+    print(dict_json['right_back'])
+    print(dict_json['left_back'])
+    print(dict_json['right_back'])
 
-    pid = p.update(dict_json['pressure']);
+
+
+    cam_display.value=dict_json['sig_cam'] #camera position values
+    manip_display.value=dict_json['sig_claw']
+
+    pid = p.update(dict_json['pressure']);#updates the pid with the current pressure value
     ser.flush()
     return pid
 
@@ -107,7 +111,7 @@ def PythontoArduino(commands):
     #print(ser)
     ser.flush()
 
-def CamControl(commands,camstate):
+def CamControl(commands):
     camaxis=0
     if joystick is not None:
         camaxis=joystick.get_axis(2)
@@ -116,12 +120,8 @@ def CamControl(commands,camstate):
         if onstatus.state:
             camaxis *= 1.414  # gives value of 1 for full thrust left and right
             camaxis=ServoConfinements(camaxis)
-    if camstate==0:
-        commands["scam1"]=camaxis
-        commands["scam2"]=0
-    elif camstate==1:
-        commands["scam1"]=0
-        commands["scam2"]=camaxis
+    camaxis=ServoConfinements(camaxis)
+    commands["scam"]=camaxis
 
 def JoystickCommands(crab,commands):
     x=0
@@ -145,15 +145,23 @@ def JoystickCommands(crab,commands):
         x=ServoConfinements(x)
         y=ServoConfinements(y)
         # add to dictionary
+        x=float(x)
+        y=float(y)
         # cube gives more control with lower power
-        commands['tleftf'] = (y-crab) ** 3
-        commands['trightf'] = (-x+crab) ** 3 #for some reason 45 degree angles give a value moving forward, might be the controller
-        commands['tleftb'] = (y+crab)**3
-        commands['trightb'] = (-x-crab)**3
-        mleftslider.value = commands['tleftf']  # assign thruster values to a display (+1,-1)
-        mrightslider.value = commands['trightf']
+        commands['frontleft'] = (y-crab) ** 3
+        commands['frontright'] = (-x+crab) ** 3 #for some reason 45 degree angles give a value moving forward, might be the controller
+        commands['backleft'] = (y+crab)**3
+        commands['backright'] = (-x-crab)**3
+
+        print(commands['frontleft'])
+        print(commands['frontright'])#values are between -1 and 1 but arduino is not returning proper values???
+        print(commands['backleft'])
+        print(commands['backright'])
+
+
+        mleftslider.value = commands['frontleft']  # assign thruster values to a display (+1,-1)
+        mrightslider.value = commands['backright']
         zslider.value = commands['tup']
-        return commands
 
 def GuiBlit():
     dheight = onstatus.get_height()
@@ -169,10 +177,11 @@ def GuiBlit():
     screen.blit(altitude_display.render(), (220, 6 * dheight))
     screen.blit(depth_display.render(), (0, 7 * dheight))
 
-    screen.blit(cam1_display.render(), (0, 5 * dheight))
-    screen.blit(cam2_display.render(), (220, 5 * dheight))
+    screen.blit(cam_display.render(), (0, 5 * dheight))
+    screen.blit(manip_display.render(), (220, 5 * dheight))
     screen.blit(th_up_display.render(), (0, 2 * dheight))
 
+    #thrusters
     screen.blit(front_left_display.render(), (0, 3 * dheight))
     screen.blit(front_right_display.render(), (220, 3 * dheight))
     screen.blit(back_left_display.render(), (0, 4 * dheight))
@@ -192,48 +201,47 @@ def GuiBlit():
 
 crab_left = False
 crab_right = False
-camtoggle=False
-vert_up=False
-vert_down=False
+vert_up=0
+vert_down=0
 pidtoggle=False
+clawopen=False
+pswitch=False
 crab=0
 z=0
 pid=0
+claw=1100
 pidlist=[0,0,0]
+
+
 while True:
     try:
         pid = ArduinoToPython()
     except Exception as e:
         print(e)
     pid=RollingAverage(pid,pidlist)
-    camstate = 0
     pygame.event.pump()  # internally process pygame event handlers
     for event in pygame.event.get():  # get events from the queue
         if event.type == pygame.QUIT:  # clean exit on quitting (x window)
-            pygame.exit()
             pygame.running = False
+            pygame.quit()
         elif event.type == pygame.JOYBUTTONDOWN:
             # check if a button is pushed
-            if event.button == 9:  # The button with 1 is pushed
+            if event.button == 7:
                 onstatus.toggle()
-            if event.button == 2:
+            if event.button == 2:#A
+                if clawopen:
+                    clawopen = False
+                else:
+                    clawopen = True
+            if event.button == 3: #X
                 if pidtoggle:
                     pidtoggle=False
                 else:
                     pidtoggle = True
-            if event.button == 3:
-                if camtoggle:
-                    camtoggle = False
-                else:
-                    camtoggle = True
-            if event.button == 4:
+            if event.button == 4:#LB
                 crab_left = True
-            if event.button == 5:
+            if event.button == 5:#RB
                 crab_right = True
-            if event.button == 6:
-                vert_up = True
-            if event.button == 7:
-                vert_down = True
 
         elif event.type == pygame.JOYBUTTONUP:  # this format with the TrueFalse values and joybutton up seems to be the only way pygame can check if a button is held
             if event.button == 4:
@@ -252,20 +260,37 @@ while True:
         crab -= .1
     if crab_right:
         crab += .1
-    if camtoggle:
-        camstate = 1
-    if vert_up:
-        z += .1
-    if vert_down:
-        z -= .1
+
     if pidtoggle:
-        z = pid;
-    print(z)
+        z = pid
+    else:
+        z=0
+
+    if clawopen:
+        claw=1900
+    else:
+        claw=1100
+    if pidtoggle==False:
+        vert_down=joystick.get_axis(4)
+        vert_up=joystick.get_axis(5)
+        vert_up+=1
+        vert_down+=1
+
+
+        if vert_up>0 and vert_down>-1:
+            z=0
+
+        if vert_up>0:#with the new controller, it seems the triggers are considered as axises instead of button presses, this is actually good because we can control our z value strength
+            z=-vert_up
+
+        elif vert_down>-1:
+            z=vert_down
     z = ServoConfinements(z)
     crab = ServoConfinements(crab)
     commands = {}  # define python dictionary
     commands['tup'] = -z ** 3
+    commands['sclaw']=claw
     JoystickCommands(crab, commands)  # function returns controller inputs
-    CamControl(commands, camstate)
+    CamControl(commands)
     PythontoArduino(commands)
     GuiBlit()  # blits all of our data onto the screen
