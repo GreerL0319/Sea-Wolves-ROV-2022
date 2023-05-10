@@ -3,10 +3,10 @@
 #include <Adafruit_Sensor.h> //Load from Tools/Manage Libraries
 #include <DHT.h>
 #include <Wire.h> //this library allows us to use the sda and scl ports for the PID
-#include <MS5837.h> 
+#include <MS5837.h>
 
 MS5837 sensor; //sets the sensor variable to the pressure class
-Servo servo_lff, servo_rtf, servo_lfb,servo_rtb, servo_up1, servo_up2,servo_cam1,servo_cam2;
+Servo servo_leftfront, servo_rightfront, servo_leftback,servo_rightback, servo_up1, servo_up2,servo_cam,servo_pswitch,servo_clawmanip;
 
 int val; //variable for temperature reading
 int tempPin = A1;//define analog pin to read TMP36 sensor
@@ -14,14 +14,16 @@ int tempPin = A1;//define analog pin to read TMP36 sensor
 byte DHTPIN =8; //DHT22 PWM pin assign
 DHT dht = DHT(DHTPIN,DHT22);
 
-byte servoPin_rtf= 3; // Rightf thruster PWM
-byte servoPin_lff= 2; //Leftf thruster PWM
-byte servoPin_rtb= 6; // Rightb thruster PWM
-byte servoPin_lfb= 7; //Leftb thruster PWM
-byte servoPin_up1 = 5; //Up1 thruster PWM
-byte servoPin_up2 = 4; //Up2 thruster PWM
-byte servoPin_cam1=8; //Camera 1 thruster PWM
-byte servoPin_cam2=9; //Camera 1 thruster PWM
+byte servoPin_leftfront= 24; //Leftf thruster PWM
+byte servoPin_rightfront= 26; // Rightf thruster PWM
+byte servoPin_leftback= 28; //Leftb thruster PWM
+byte servoPin_rightback= 30; // Rightb thruster PWM
+byte servoPin_up1 = 32; //Up1 thruster PWM
+byte servoPin_up2 = 34; //Up2 thruster PWM
+byte servoPin_cam=8; //Camera 1 thruster PWM
+byte servoPin_pswitch=22; //power switch
+byte servoPin_clawmanip=1; //claw servo
+
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);// initialize digital pin LED_BUILTIN as an output.
@@ -29,12 +31,13 @@ void setup() {
   Serial.begin(9600);
   servo_up1.attach(servoPin_up1); //Attach defines servo pin as earlier library only supported pins 9 and 10
   servo_up2.attach(servoPin_up2);
-  servo_lff.attach(servoPin_lff);
-  servo_rtf.attach(servoPin_rtf);
-  servo_lfb.attach(servoPin_lfb);
-  servo_rtb.attach(servoPin_rtb);
-  servo_cam1.attach(servoPin_cam1);
-  servo_cam2.attach(servoPin_cam2);
+  servo_leftfront.attach(servoPin_leftfront);
+  servo_rightfront.attach(servoPin_rightfront);
+  servo_leftback.attach(servoPin_leftback);
+  servo_rightback.attach(servoPin_rightback);
+  servo_cam.attach(servoPin_cam);
+  servo_pswitch.attach(servoPin_pswitch);
+  servo_clawmanip.attach(servoPin_clawmanip);
   
   Wire.begin();
   sensor.setModel(MS5837::MS5837_02BA);
@@ -45,6 +48,18 @@ void setup() {
   delay(7000); //delay to allow ESC to recognize the stopped signal
 }
 
+float servoScale(float value, float minInput=-1, float maxInput=1, float minOutput=1100, float maxOutput=1900) {//better way to scale from (-1-1) to (1100-1900)
+  return minOutput + (maxOutput - minOutput) * (value - minInput) / (maxInput - minInput);
+}
+int servoLimits(int value){
+  if(value>1900){
+    value=1900;
+  }
+  if(value<1100){
+    value=1100;
+  }
+  return value;
+}
 void loop() {
   sensor.read();//reads value from Bar02 Pressure Sensor
   String thruster;
@@ -59,46 +74,51 @@ void loop() {
     thruster=Serial.readStringUntil( '\x7D' );//Read data from Arduino until};
     StaticJsonDocument<1000> json_doc; //the StaticJsonDocument we write to
     deserializeJson(json_doc,thruster);
- 
-    //Leftf Thruster
-    float front_left=json_doc["tleftf"];
-    int front_left_sig=(front_left+1)*400+1100; //map controller to servo
-    servo_lff.writeMicroseconds(front_left_sig); //Send signal to ESC
-    
-    //Rightf Thruster
-    float front_right=json_doc["trightf"];
-    int front_right_sig=(front_right+1)*400+1100; //map controller to servo
-    servo_rtf.writeMicroseconds(front_right_sig); //Send signal to ESC
-    
-    //Leftb Thruster
-    float back_left=json_doc["tleftb"];
-    int back_left_sig=(back_left+1)*400+1100; //map controller to servo
-    servo_lfb.writeMicroseconds(back_left_sig); //Send signal to ESC
-    
-    //Rightb Thruster
-    float back_right=json_doc["trightb"];
-    int back_right_sig=(back_right+1)*400+1100; //map controller to servo
-    servo_rtb.writeMicroseconds(back_right_sig); //Send signal to ESC
-    
-    //Vertical Thruster 1 
-    float th_up_1 = json_doc["tup"];
-    int th_up_sig_1=(th_up_1+1)*400+1100; //map controller to servo
-    servo_up1.writeMicroseconds(th_up_sig_1); //Send signal to ESC
 
-    //Vertical Thruster 2
-    float th_up_2 = json_doc["tup"];
-    int th_up_sig_2=(th_up_2+1)*400+1100; //map controller to servo
-    servo_up2.writeMicroseconds(th_up_sig_2); //Send signal to ESC
+    //Power Switch
+    float pswitch_sig=json_doc["spswitch"];
+    servo_pswitch.writeMicroseconds(pswitch_sig);
+    
+    //Movement thrusters
+    //front left
+    float fl=json_doc["frontleft"];
+    int fl_sig=servoScale(fl);
+    fl_sig=servoLimits(fl_sig);
+    servo_leftfront.writeMicroseconds(fl_sig);
 
-    //Camera 1 Servo
-    float cam1=json_doc["scam1"];
-    int cam_sig_1=(cam1+1)*400+1100;
-    servo_cam1.writeMicroseconds(cam_sig_1);
+    //front right
+    float fr=json_doc["frontright"];
+    int fr_sig=servoScale(fr);
+    fr_sig=servoLimits(fr_sig);
+    servo_rightfront.writeMicroseconds(fr_sig);
 
-    //Camera 2 Servo
-    float cam2=json_doc["scam2"];
-    int cam_sig_2=(cam2+1)*400+1100;
-    servo_cam2.writeMicroseconds(cam_sig_2);
+    //back left
+    float bl=json_doc["backleft"];
+    int bl_sig=servoScale(bl);
+    bl_sig=servoLimits(bl_sig);
+    servo_leftback.writeMicroseconds(bl_sig);
+
+    //back right
+    float br=json_doc["backright"];
+    int br_sig=servoScale(br);
+    br_sig=servoLimits(br_sig);
+    servo_rightback.writeMicroseconds(br_sig);
+
+    
+    //Vertical Thrusters
+    float th_up = json_doc["tup"];
+    int th_up_sig=servoScale(th_up); //map controller to servo
+    servo_up1.writeMicroseconds(th_up_sig); //Send signal to ESC
+    servo_up2.writeMicroseconds(th_up_sig); //Send signal to ESC
+
+    //Camera Servo
+    float cam=json_doc["scam"];
+    int cam_sig=servoScale(cam);
+    servo_cam.writeMicroseconds(cam_sig);
+
+    //Claw Manip
+    int claw_sig=json_doc["sclaw"];//i decided to send the code from python as already having a 1100 or 1900
+    servo_clawmanip.writeMicroseconds(claw_sig);
 
     //Read Temperature, return to surface
     val=analogRead(tempPin);//read arduino pin
@@ -110,14 +130,11 @@ void loop() {
     float h = dht.readHumidity();
     float t = dht.readTemperature(true);//Read temperature in Fahrenheit
 
-    doc["sig_up_1"]=th_up_sig_1;
-    doc["sig_up_2"]=th_up_sig_2;
-    doc["sig_rtf"]=front_right_sig;
-    doc["sig_lff"]=front_left_sig;
-    doc["sig_rtb"]=back_right_sig;
-    doc["sig_lfb"]=back_left_sig;
-    doc["sig_cam1"]=cam_sig_1;
-    doc["sig_cam2"]=cam_sig_2;
+    doc["sig_pswitch"]=pswitch_sig;//power
+    doc["sig_up"]=th_up_sig;
+    
+    doc["sig_cam"]=cam_sig;
+    doc["sig_claw"]=claw_sig;
     doc["temp"]=cel;//add temp in Celsius to StaticJsonDocument
     doc["volt"]=mv;// add temp in Fahrenheit 
     doc["temp_dht"]=t;//temperature from dht22
@@ -126,11 +143,10 @@ void loop() {
     doc["depth"]=sensor.depth();
     doc["altitude"]=sensor.altitude();
 
-
-
-
-
-    
+    doc["right_front"]=fr_sig;
+    doc["left_front"]=fl_sig;
+    doc["right_back"]=br_sig;
+    doc["left_back"]=bl_sig;
     serializeJson(doc,Serial);//convert to Json string,sends to surface
     Serial.println();//newline
     delay(10);
